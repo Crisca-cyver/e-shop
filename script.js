@@ -5,6 +5,14 @@ let currentCategory = 'All';
 let currentSort = 'Relevance';
 let whatsappProducts = []; // Para almacenar productos importados de WhatsApp
 
+// Actualizar el año actual en el footer
+function updateCurrentYear() {
+    const currentYearElement = document.getElementById('current-year');
+    if (currentYearElement) {
+        currentYearElement.textContent = new Date().getFullYear();
+    }
+}
+
 // Cargar productos desde Google Sheets
 async function loadProducts() {
     try {
@@ -87,27 +95,75 @@ function displayProducts() {
         // Usar la imagen del producto si está disponible, o la imagen de placeholder
         const imageSrc = product.image && product.image.trim() !== '' ? product.image : 'images/placeholder.jpg';
         
+        // Crear la URL de la imagen alternativa (con sufijo 'a')
+        let altImageSrc = '';
+        if (imageSrc && imageSrc !== 'images/placeholder.jpg') {
+            // Si la imagen es de la carpeta local 'images'
+            if (imageSrc.startsWith('images/')) {
+                const baseName = imageSrc.replace('.jpg', '').replace('.png', '');
+                altImageSrc = `${baseName}a.jpg`;
+            } 
+            // Si es una URL externa
+            else {
+                altImageSrc = imageSrc.replace('.jpg', 'a.jpg').replace('.png', 'a.png');
+            }
+        } else {
+            altImageSrc = 'images/placeholder.jpg';
+        }
+        
         productCard.innerHTML = `
             <div class="product-image">
-                <img src="${imageSrc}" alt="${product.name}" onerror="this.src='images/placeholder.jpg'">
+                <div class="image-container">
+                    <img src="${imageSrc}" alt="${product.name}" class="main-image active loaded" onerror="this.src='images/placeholder.jpg'">
+                    <img src="${altImageSrc}" alt="${product.name} - Alternativa" class="alt-image" onerror="this.src='images/placeholder.jpg'">
+                </div>
+                <div class="image-controls">
+                    <span class="image-dot active" data-image="main"></span>
+                    <span class="image-dot" data-image="alt"></span>
+                </div>
                 ${isWhatsappProduct ? '<span class="whatsapp-badge">WhatsApp</span>' : ''}
             </div>
             <div class="product-info">
                 <div class="product-name">${product.name}</div>
                 <div class="product-price">${product.price.toFixed(2)} ${product.currency}</div>
                 ${product.description ? `<div class="product-description">${product.description}</div>` : ''}
+                ${product.category ? `<div class="product-category"><span>Categoría:</span> ${product.category}</div>` : ''}
             </div>
         `;
         
-        // Añadir clase 'loaded' cuando la imagen se carga completamente
-        const img = productCard.querySelector('img');
-        if (img.complete) {
-            img.classList.add('loaded');
-        } else {
-            img.addEventListener('load', () => {
+        // Añadir clase 'loaded' a las imágenes cuando se cargan completamente
+        const images = productCard.querySelectorAll('img');
+        images.forEach(img => {
+            if (img.complete) {
                 img.classList.add('loaded');
+            } else {
+                img.addEventListener('load', () => {
+                    img.classList.add('loaded');
+                });
+            }
+        });
+        
+        // Configurar los controles de imagen para alternar entre imágenes
+        const imageDots = productCard.querySelectorAll('.image-dot');
+        const mainImage = productCard.querySelector('.main-image');
+        const altImage = productCard.querySelector('.alt-image');
+        
+        imageDots.forEach(dot => {
+            dot.addEventListener('click', () => {
+                // Quitar clase active de todos los puntos e imágenes
+                imageDots.forEach(d => d.classList.remove('active'));
+                mainImage.classList.remove('active');
+                altImage.classList.remove('active');
+                
+                // Añadir clase active al punto seleccionado y su imagen correspondiente
+                dot.classList.add('active');
+                if (dot.dataset.image === 'main') {
+                    mainImage.classList.add('active');
+                } else {
+                    altImage.classList.add('active');
+                }
             });
-        }
+        });
         
         productCard.addEventListener('click', () => {
             // Aquí se podría implementar la vista detallada del producto
@@ -459,6 +515,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     loadProducts();
     setupEventListeners();
+    updateCurrentYear();
     
     // La funcionalidad de importación de WhatsApp ha sido eliminada
 });

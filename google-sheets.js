@@ -192,7 +192,7 @@ window.googleSheetsUtils.convertCsvToProducts = function(csvText) {
             category: 'Sin categoría',
             featured: false,
             description: row.length > 2 ? row[2] : '',
-            image: row.length > 3 && row[3] ? row[3] : 'images/placeholder.jpg'
+            image: row.length > 3 && row[3] ? row[3].replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/') : 'images/placeholder.jpg'
         };
         
         console.log('Producto procesado:', product);
