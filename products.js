@@ -9,11 +9,46 @@ async function getAllProducts() {
     try {
         const response = await fetch('products.json');
         const data = await response.json();
-        return data.products;
+        const products = data.products || [];
+        
+        // Si no hay productos en el JSON, usar productos de ejemplo
+        if (products.length === 0) {
+            console.log('No se encontraron productos en products.json, usando productos de ejemplo');
+            return getExampleProducts();
+        }
+        
+        return products;
     } catch (error) {
         console.error('Error al cargar los productos:', error);
-        return [];
+        console.log('Usando productos de ejemplo como fallback');
+        return getExampleProducts();
     }
+}
+
+// Función para obtener productos de ejemplo como fallback
+function getExampleProducts() {
+    return [
+        {
+            id: 1,
+            name: 'Producto de Ejemplo 1',
+            price: 1999.99,
+            currency: '$',
+            category: 'Ejemplo',
+            featured: true,
+            description: 'Este es un producto de ejemplo para cuando no se pueden cargar los datos reales.',
+            image: 'images/placeholder.jpg'
+        },
+        {
+            id: 2,
+            name: 'Producto de Ejemplo 2',
+            price: 2499.99,
+            currency: '$',
+            category: 'Ejemplo',
+            featured: false,
+            description: 'Otro producto de ejemplo para cuando no se pueden cargar los datos reales.',
+            image: 'images/placeholder.jpg'
+        }
+    ];
 }
 
 // Función para obtener productos desde WhatsApp Business

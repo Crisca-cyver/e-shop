@@ -13,38 +13,326 @@ function updateCurrentYear() {
     }
 }
 
-// Cargar productos desde Google Sheets
+// Cargar productos desde Google Sheets o CSV local
 async function loadProducts() {
+    let loadedProducts = [];
+    
     try {
-        // Obtener el ID de la hoja de Google Sheets o URL CSV directa desde la URL
+        // Obtener parámetros de URL
         const urlParams = new URLSearchParams(window.location.search);
         const sheetId = urlParams.get('sheetId');
-        const gid = urlParams.get('gid') || 0;
+        const gid = urlParams.get('gid') || '0';
         const csvUrl = urlParams.get('csvUrl');
         
-        // Si hay una URL CSV directa, cargar desde ella
-        if (csvUrl) {
-            console.log('Cargando productos desde URL CSV directa:', csvUrl);
-            const response = await fetch(csvUrl);
-            if (!response.ok) {
-                throw new Error(`Error al cargar datos desde URL CSV: ${response.status}`);
-            }
-            const csvText = await response.text();
-            products = window.googleSheetsUtils.convertCsvToProducts(csvText);
-        }
-        // Si hay un ID de hoja, cargar desde Google Sheets
-        else if (sheetId) {
-            console.log('Cargando productos desde Google Sheets:', sheetId);
-            products = await window.googleSheetsUtils.loadProductsFromPublicSheet(sheetId, gid);
-        }
-        // Si no hay ni URL CSV ni ID de hoja, intentar cargar desde products.json
-        else {
-            console.log('No se especificó un origen de datos, cargando desde products.json');
-            const response = await fetch('products.json');
-            const data = await response.json();
-            products = data.products;
+        console.log('Parámetros de URL detectados:', { sheetId, gid, csvUrl });
+        
+        // Mostrar mensaje de carga
+        document.getElementById('products-container').innerHTML = '<div class="loading">Cargando productos...</div>';
+        
+        // Validar que tenemos al menos un parámetro válido
+        if (!sheetId && !csvUrl) {
+            console.error('No se proporcionó sheetId o csvUrl');
+            document.getElementById('products-container').innerHTML = 
+                '<div class="error-message">Error: No se proporcionó una URL de hoja de cálculo válida</div>';
+            return [];
         }
         
+        // Asegurarse de que el script de Google Sheets esté cargado primero
+        if (!window.googleSheetsUtils || typeof window.googleSheetsUtils.convertCsvToProducts !== 'function') {
+            console.log('Cargando script de Google Sheets primero...');
+            await new Promise((resolve) => {
+                const script = document.createElement('script');
+                script.src = 'fix-google-sheets.js';
+                script.onload = () => {
+                    console.log('Script de Google Sheets cargado correctamente');
+                    resolve();
+                };
+                script.onerror = () => {
+                    console.error('No se pudo cargar fix-google-sheets.js');
+                    resolve();
+                };
+                document.head.appendChild(script);
+            });
+        }
+        
+        // Intentar cargar desde Google Sheets si hay URL CSV
+        if (csvUrl) {
+            console.log('Intentando cargar desde URL CSV:', csvUrl);
+            try {
+                // Para URLs publicadas, necesitamos usar un enfoque diferente
+                // En lugar de extraer el ID, usaremos directamente la URL del CSV
+                // y la convertiremos a un formato que podamos usar
+                
+                // Verificar si es una URL de Google Sheets publicada
+                if (csvUrl.includes('docs.google.com/spreadsheets') && csvUrl.includes('/pub')) {
+                    console.log('Detectada URL de hoja publicada');
+                    
+                    // Extraer el ID completo de la URL (incluyendo la parte 'e' para hojas publicadas)
+                    let fullSheetId = '';
+                    let match;
+                    
+                    if (csvUrl.includes('/d/e/')) {
+                        // Formato: https://docs.google.com/spreadsheets/d/e/[ID]/pub
+                        match = csvUrl.match(/spreadsheets\/d\/e\/([\w-]+)/);
+                        if (match && match[1]) {
+                            fullSheetId = match[1];
+                            console.log('ID completo extraído (formato publicado):', fullSheetId);
+                            
+                            // Para hojas publicadas, usamos un enfoque diferente
+                            // Crear un iframe oculto que cargue la hoja
+                            const iframe = document.createElement('iframe');
+                            iframe.style.display = 'none';
+                            iframe.src = csvUrl;
+                            
+                            // Esperar a que se cargue y extraer los datos
+                            document.body.appendChild(iframe);
+                            
+                            // Convertir URL de edición a URL de publicación CSV
+                            let csvPublicUrl = csvUrl;
+                            if (csvUrl.includes('/edit') || csvUrl.includes('/d/') && !csvUrl.includes('/pub')) {
+                                // Extraer el ID de la hoja
+                                const sheetIdMatch = csvUrl.match(/\/d\/([a-zA-Z0-9_-]+)/); 
+                                if (sheetIdMatch && sheetIdMatch[1]) {
+                                    const extractedId = sheetIdMatch[1];
+                                    csvPublicUrl = `https://docs.google.com/spreadsheets/d/${extractedId}/export?format=csv`;
+                                    if (gid && gid !== '0') {
+                                        csvPublicUrl += `&gid=${gid}`;
+                                    }
+                                    console.log('URL convertida a formato de exportación:', csvPublicUrl);
+                                }
+                            }
+                            
+                            // Usar un proxy CORS para acceder a la URL CSV
+                            const corsProxyUrl = `https://corsproxy.io/?${encodeURIComponent(csvPublicUrl)}`;
+                            console.log('Intentando cargar a través de proxy CORS:', corsProxyUrl);
+                            
+                            try {
+                                console.log('Iniciando fetch de datos CSV...');
+                                const response = await fetch(corsProxyUrl);
+                                console.log('Respuesta recibida:', response.status, response.statusText);
+                                
+                                if (!response.ok) {
+                                    throw new Error(`Error al cargar CSV: ${response.status} ${response.statusText}`);
+                                }
+                                
+                                const csvText = await response.text();
+                                console.log('CSV obtenido, longitud:', csvText.length);
+                                console.log('Primeras líneas del CSV:', csvText.split('\n').slice(0, 3));
+                                
+                                if (!csvText || csvText.trim() === '') {
+                                    throw new Error('El archivo CSV está vacío');
+                                }
+                                
+                                if (window.googleSheetsUtils && typeof window.googleSheetsUtils.convertCsvToProducts === 'function') {
+                                    console.log('Convirtiendo CSV a productos...');
+                                    loadedProducts = window.googleSheetsUtils.convertCsvToProducts(csvText);
+                                    console.log('Productos cargados desde CSV:', loadedProducts ? loadedProducts.length : 0);
+                                    
+                                    if (!loadedProducts || loadedProducts.length === 0) {
+                                        console.warn('No se encontraron productos en el CSV');
+                                        document.getElementById('products-container').innerHTML = 
+                                            '<div class="error-message">No se encontraron productos en la hoja de cálculo</div>';
+                                    }
+                                    
+                                    return loadedProducts;
+                                } else {
+                                    throw new Error('Función convertCsvToProducts no disponible');
+                                }
+                            } catch (error) {
+                                console.error('Error al cargar CSV a través de proxy:', error);
+                                document.getElementById('products-container').innerHTML = 
+                                    `<div class="error-message">Error al cargar productos: ${error.message}</div>`;
+                            }
+                            
+                            // Aunque no podamos leer la respuesta debido a no-cors,
+                            // podemos intentar cargar el CSV como un script
+                            const script = document.createElement('script');
+                            script.src = csvUrl;
+                            document.body.appendChild(script);
+                            
+                            // Esperar un momento para que se cargue
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            
+                            // Limpiar
+                            document.body.removeChild(iframe);
+                            document.body.removeChild(script);
+                        }
+                    } else if (csvUrl.includes('/d/')) {
+                        // Formato estándar: https://docs.google.com/spreadsheets/d/[ID]/
+                        match = csvUrl.match(/spreadsheets\/d\/([\w-]+)/);
+                        if (match && match[1]) {
+                            sheetId = match[1];
+                            console.log('ID estándar extraído:', sheetId);
+                        }
+                    }
+                }
+                
+                // Intentar usar el ID si lo tenemos, o usar directamente la URL del CSV
+                if (window.googleSheetsUtils && typeof window.googleSheetsUtils.loadProductsFromPublicSheet === 'function') {
+                    // Extraer gid si está presente en la URL
+                    let gid = '0';
+                    const gidMatch = csvUrl.match(/gid=([0-9]+)/);
+                    if (gidMatch && gidMatch[1]) {
+                        gid = gidMatch[1];
+                    }
+                    
+                    // Usar el proxy CORS en lugar de intentar cargar directamente
+                    console.log('Usando exclusivamente el proxy CORS para cargar los datos');
+                    
+                    // No intentamos cargar directamente para evitar problemas de CORS
+                    // El proxy ya se encargó de esto en el código anterior
+                    
+                    // Si no tenemos productos todavía, intentar con la función de conversión CSV
+                    if (!loadedProducts.length) {
+                        try {
+                            // Intentar cargar el CSV directamente
+                            console.log('Intentando cargar CSV desde:', csvUrl);
+                            const response = await fetch(csvUrl);
+                            console.log('Respuesta CSV:', response.status, response.statusText);
+                            
+                            if (!response.ok) {
+                                throw new Error(`Error al cargar CSV: ${response.status} ${response.statusText}`);
+                            }
+                            
+                            const text = await response.text();
+                            console.log('CSV cargado, longitud:', text.length);
+                            console.log('Primeras líneas:', text.substring(0, 100));
+                            
+                            if (!text || text.trim() === '') {
+                                throw new Error('El archivo CSV está vacío');
+                            }
+                            
+                            // Verificar si la función de conversión está disponible
+                            if (window.googleSheetsUtils && typeof window.googleSheetsUtils.convertCsvToProducts === 'function') {
+                                console.log('Convirtiendo CSV a productos...');
+                                loadedProducts = window.googleSheetsUtils.convertCsvToProducts(text);
+                                console.log('Productos convertidos:', loadedProducts ? loadedProducts.length : 0);
+                            } else {
+                                console.error('Función convertCsvToProducts no disponible');
+                                // Intentar cargar el script de Google Sheets si no está disponible
+                                await new Promise((resolve) => {
+                                    const script = document.createElement('script');
+                                    script.src = 'fix-google-sheets.js';
+                                    script.onload = () => {
+                                        console.log('Script de Google Sheets cargado correctamente');
+                                        resolve();
+                                    };
+                                    script.onerror = (e) => {
+                                        console.error('No se pudo cargar fix-google-sheets.js', e);
+                                        resolve();
+                                    };
+                                    document.head.appendChild(script);
+                                });
+                                
+                                // Intentar nuevamente después de cargar el script
+                                if (window.googleSheetsUtils && typeof window.googleSheetsUtils.convertCsvToProducts === 'function') {
+                                    console.log('Función convertCsvToProducts disponible después de cargar script');
+                                    loadedProducts = window.googleSheetsUtils.convertCsvToProducts(text);
+                                    console.log('Productos convertidos después de cargar script:', loadedProducts ? loadedProducts.length : 0);
+                                } else {
+                                    console.error('Funciones de Google Sheets no disponibles después de cargar script');
+                                    throw new Error('Funciones de Google Sheets no disponibles');
+                                }
+                            }
+                            
+                            if (!loadedProducts || loadedProducts.length === 0) {
+                                throw new Error('No se encontraron productos en el CSV');
+                            }
+                        } catch (e) {
+                            console.error('Error al cargar CSV directamente:', e);
+                            document.getElementById('products-container').innerHTML = 
+                                `<div class="error-message">No se encontraron productos. Verifica la URL de la hoja de cálculo.</div>`;
+                        }
+                    }
+                    
+                    console.log('Productos cargados desde Google Sheets:', loadedProducts ? loadedProducts.length : 0);
+                } else {
+                    throw new Error('Funciones de Google Sheets no disponibles');
+                }
+            } catch (error) {
+                console.error('Error al cargar desde CSV URL:', error);
+                // Mostrar error en la interfaz en lugar de alerta
+                document.getElementById('products-container').innerHTML = 
+                    `<div class="error-message">Error al cargar productos: ${error.message}</div>`;
+                loadedProducts = [];
+            }
+        }
+        // Intentar cargar desde Google Sheets si hay ID de hoja
+        else if (sheetId) {
+            console.log('Intentando cargar desde Google Sheets ID:', sheetId);
+            try {
+                // Construir URL de exportación
+                let url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+                if (gid !== '0') {
+                    url += `&gid=${gid}`;
+                }
+                
+                console.log('URL de Google Sheets construida:', url);
+                
+                // Usar proxy CORS para evitar problemas de CORS
+                const corsProxyUrl = 'https://corsproxy.io/?';
+                const proxiedUrl = corsProxyUrl + encodeURIComponent(url);
+                console.log('URL con proxy CORS:', proxiedUrl);
+                
+                // Realizar solicitud a través del proxy
+                console.log('Iniciando fetch de datos...');
+                const response = await fetch(proxiedUrl);
+                console.log('Respuesta recibida:', response.status, response.statusText);
+                
+                if (!response.ok) {
+                    throw new Error(`Error al cargar CSV: ${response.status} ${response.statusText}`);
+                }
+                
+                const csvData = await response.text();
+                console.log('Datos CSV cargados, longitud:', csvData.length);
+                
+                if (!csvData || csvData.trim() === '') {
+                    throw new Error('El archivo CSV está vacío');
+                }
+                
+                if (window.googleSheetsUtils && typeof window.googleSheetsUtils.convertCsvToProducts === 'function') {
+                    console.log('Convirtiendo CSV a productos...');
+                    loadedProducts = window.googleSheetsUtils.convertCsvToProducts(csvData);
+                    console.log('Productos cargados desde Google Sheets ID:', loadedProducts ? loadedProducts.length : 0);
+                } else {
+                    throw new Error('Función convertCsvToProducts no disponible');
+                }
+            } catch (error) {
+                console.error('Error al cargar desde Google Sheets ID:', error);
+                // Mostrar error en la interfaz
+                document.getElementById('products-container').innerHTML = 
+                    `<div class="error-message">Error al cargar productos: ${error.message}</div>`;
+                loadedProducts = [];
+            }
+        }
+        // Mostrar mensaje si no hay parámetros de Google Sheets
+        else {
+            console.log('No se proporcionó URL de CSV o ID de hoja de Google Sheets');
+            document.getElementById('products-container').innerHTML = 
+                '<div class="error-message">No se encontraron productos. Verifica la URL de la hoja de cálculo.</div>';
+            loadedProducts = [];
+        }
+    } catch (error) {
+        console.error('Error general al cargar productos:', error);
+        loadedProducts = [];
+    }
+    
+    return loadedProducts;
+}
+
+// Inicializar productos
+async function initializeProducts() {
+    try {
+        products = await loadProducts();
+        
+        if (!products || products.length === 0) {
+            console.warn('No se cargaron productos');
+            document.getElementById('products-container').innerHTML = 
+                '<div class="error-message">No se encontraron productos. Verifica la URL de la hoja de cálculo.</div>';
+            return;
+        }
+        
+        console.log('Productos inicializados correctamente:', products.length);
         filteredProducts = [...products];
         
         // Combinar con productos de WhatsApp si existen
@@ -55,7 +343,7 @@ async function loadProducts() {
         }
         
         displayProducts();
-        
+            
         // Ocultar la sección del carrusel ya que no hay productos
         const carouselSection = document.querySelector('.carousel-container');
         if (carouselSection) {
@@ -513,7 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
         carouselSection.style.display = 'none';
     }
     
-    loadProducts();
+    initializeProducts();
     setupEventListeners();
     updateCurrentYear();
     
